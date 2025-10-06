@@ -1,0 +1,131 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    font-family: 'DM Sans', sans-serif;
+  }
+}
+
+@layer utilities {
+  /* 🌙 Custom Color Based on Sleep Prediction Image */
+  .bg-primary {
+    background-color: #4ED7F1; /* Cyan highlight (used in graph) */
+  }
+
+  .bg-primary-100 {
+    background-color: #EAFBFE; /* Lightest cyan background */
+  }
+  
+  /* Dark mode variants for primary colors */
+  .dark .bg-primary {
+    background-color: #4ED7F1;
+  }
+
+  .dark .bg-primary-100 {
+    background-color: #1A3A3D; /* Darker variant for dark mode */
+  }
+
+  .bg-primary-200 {
+    background-color: #CDEFFB;
+  }
+  
+  .dark .bg-primary-200 {
+    background-color: #2A4A4D;
+  }
+
+  .bg-primary-300 {
+    background-color: #A5EAF9;
+  }
+  
+  .dark .bg-primary-300 {
+    background-color: #3A5A5D;
+  }
+
+  .bg-primary-400 {
+    background-color: #6BDDF6; /* Line graph cyan */
+  }
+
+  .bg-primary-500 {
+    background-color: #4ED7F1; /* Core CTA cyan */
+  }
+
+  .bg-primary-600 {
+    background-color: #3C5F92; /* Graph base color */
+  }
+
+  .bg-primary-700 {
+    background-color: #304A74; /* Midnight navy */
+  }
+
+  .bg-primary-800 {
+    background-color: #243D63; /* Deeper navy background */
+  }
+
+  .bg-primary-900 {
+    background-color: #1A2D50; /* Deepest blue used in background */
+  }
+
+  /* Hover States */
+  .hover\:bg-primary-100:hover {
+    background-color: #EAFBFE;
+  }
+  
+  .dark .hover\:bg-primary-100:hover {
+    background-color: #2A4A4D;
+  }
+
+  .hover\:bg-primary-200:hover {
+    background-color: #CDEFFB;
+  }
+
+  .hover\:bg-primary-300:hover {
+    background-color: #A5EAF9;
+  }
+
+  .hover\:bg-primary-400:hover {
+    background-color: #6BDDF6;
+  }
+
+  .hover\:bg-primary-500:hover {
+    background-color: #4ED7F1;
+  }
+
+  .hover\:bg-primary-600:hover {
+    background-color: #2D4D7C;
+  }
+
+  .hover\:bg-primary-700:hover {
+    background-color: #253B5F;
+  }
+
+  .hover\:bg-primary-800:hover {
+    background-color: #1E2F4B;
+  }
+
+  .hover\:bg-primary-900:hover {
+    background-color: #121D33;
+  }
+
+  /* Typography and Border */
+  .text-primary {
+    color: #4ED7F1;
+  }
+
+  .border-primary {
+    border-color: #4ED7F1;
+  }
+
+  .hover\:bg-primary:hover {
+    background-color: #36B6CD;
+  }
+
+  .hover\:text-primary:hover {
+    color: #4ED7F1;
+  }
+
+  .hover\:border-primary:hover {
+    border-color: #4ED7F1;
+  }
+}
