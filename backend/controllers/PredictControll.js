@@ -148,7 +148,10 @@ const makePrediction = async (req, res) => {
     
     // Calculate final prediction (between 4 and 12 hours)
     const rawPrediction = baseSleep + positiveFactors - negativeFactors - timePressure;
-    const prediction = Math.max(4, Math.min(12, rawPrediction));
+    
+    // If total activity time is very high, allow for shorter sleep duration
+    const minimumSleep = totalActivityTime > 18 ? 4.0 : 5.0;
+    const prediction = Math.max(minimumSleep, Math.min(12, rawPrediction));
     
     return prediction;
   };
@@ -221,11 +224,59 @@ const makePrediction = async (req, res) => {
         prediction: mockPredictionValue.toFixed(2)
       });
       
+      // Generate explanations for mock prediction
+      const explanation = [];
+      
+      // Calculate available time
+      const availableTime = Math.max(0, 24 - totalActivityTime);
+      
+      // Add time constraint explanation if applicable
+      if (availableTime < 6.0) {
+        explanation.push(`Your scheduled activities leave only ${availableTime.toFixed(1)} hours available, limiting possible sleep time.`);
+      }
+      
+      // Add activity impact explanations
+      if (workoutTime > 0 && workoutTime <= 2) {
+        explanation.push(`Your ${workoutTime.toFixed(1)} hours of workout has a positive effect on sleep quality.`);
+      } else if (workoutTime > 2) {
+        explanation.push(`Your ${workoutTime.toFixed(1)} hours of workout may be excessive and could affect sleep quality.`);
+      }
+      
+      if (phoneTime > 3) {
+        explanation.push(`Your ${phoneTime.toFixed(1)} hours of phone time before bed significantly reduces sleep quality.`);
+      }
+      
+      if (caffeineIntake > 300) {
+        explanation.push(`Your caffeine intake may be reducing your sleep duration.`);
+      }
+      
+      if (workHours > 10) {
+        explanation.push(`Your ${workHours.toFixed(1)} hours of work exceeds recommended limits and may affect sleep.`);
+      }
+      
+      if (relaxationTime > 1.5) {
+        explanation.push(`Your ${relaxationTime.toFixed(1)} hours of relaxation time positively impacts your sleep quality.`);
+      }
+      
+      // Add health recommendation
+      if (mockPredictionValue < 6.0) {
+        explanation.push("While 6-8 hours of sleep is generally recommended for adults, your current schedule may limit this. Consider reducing screen time or work hours if possible.");
+      }
+      
       return res.status(200).json({
         prediction: mockPredictionValue.toFixed(2),
         recommendation,
         model: model + ' (mock - server unavailable)',
         accuracy: 'N/A (mock prediction)',
+        explanation: explanation,
+        available_time: availableTime,
+        health_insights: {
+          minimum_healthy_sleep: 4.0,
+          maximum_healthy_sleep: 12.0,
+          meets_minimum_requirement: mockPredictionValue >= 4.0,
+          ideal_sleep_range: "6-8 hours",
+          available_time: availableTime
+        },
         data: {
           workoutTime: features[0],
           readingTime: features[1],
@@ -307,6 +358,8 @@ const makePrediction = async (req, res) => {
         quality_score: modelResponse.data.quality_score,
         health_insights: modelResponse.data.health_insights,
         was_constrained: modelResponse.data.was_constrained,
+        explanation: modelResponse.data.explanation || [],
+        available_time: modelResponse.data.features_used?.available_time,
         data: {
           workoutTime: features[0],
           readingTime: features[1],
@@ -338,6 +391,49 @@ const makePrediction = async (req, res) => {
         const mockPredictionValue = mockPrediction(features);
         console.log('Mock prediction value:', mockPredictionValue);
         
+        // Calculate total activity time for explanations
+        const [workoutTime, readingTime, phoneTime, workHours, caffeineIntake, relaxationTime] = features;
+        const totalActivityTime = Math.min(24, workoutTime + readingTime + phoneTime + workHours + relaxationTime);
+        
+        // Generate explanations for mock prediction
+        const explanation = [];
+        
+        // Calculate available time
+        const availableTime = Math.max(0, 24 - totalActivityTime);
+        
+        // Add time constraint explanation if applicable
+        if (availableTime < 6.0) {
+          explanation.push(`Your scheduled activities leave only ${availableTime.toFixed(1)} hours available, limiting possible sleep time.`);
+        }
+        
+        // Add activity impact explanations
+        if (workoutTime > 0 && workoutTime <= 2) {
+          explanation.push(`Your ${workoutTime.toFixed(1)} hours of workout has a positive effect on sleep quality.`);
+        } else if (workoutTime > 2) {
+          explanation.push(`Your ${workoutTime.toFixed(1)} hours of workout may be excessive and could affect sleep quality.`);
+        }
+        
+        if (phoneTime > 3) {
+          explanation.push(`Your ${phoneTime.toFixed(1)} hours of phone time before bed significantly reduces sleep quality.`);
+        }
+        
+        if (caffeineIntake > 300) {
+          explanation.push(`Your caffeine intake may be reducing your sleep duration.`);
+        }
+        
+        if (workHours > 10) {
+          explanation.push(`Your ${workHours.toFixed(1)} hours of work exceeds recommended limits and may affect sleep.`);
+        }
+        
+        if (relaxationTime > 1.5) {
+          explanation.push(`Your ${relaxationTime.toFixed(1)} hours of relaxation time positively impacts your sleep quality.`);
+        }
+        
+        // Add health recommendation
+        if (mockPredictionValue < 6.0) {
+          explanation.push("While 6-8 hours of sleep is generally recommended for adults, your current schedule may limit this. Consider reducing screen time or work hours if possible.");
+        }
+        
         // Add a small delay before generating recommendation to ensure API is ready
         console.log('Waiting briefly before generating recommendation for mock prediction...');
         await new Promise(resolve => setTimeout(resolve, 500));
@@ -355,12 +451,21 @@ const makePrediction = async (req, res) => {
         });
         console.log('Mock recommendation generation completed');
         
-        // Return the mock prediction and recommendation
+        // Return the mock prediction and recommendation with explanations
         return res.status(200).json({
           prediction: mockPredictionValue.toFixed(2),
           recommendation,
           model: model + ' (mock)',
           accuracy: 'N/A (mock prediction)',
+          explanation: explanation,
+          available_time: availableTime,
+          health_insights: {
+            minimum_healthy_sleep: 4.0,
+            maximum_healthy_sleep: 12.0,
+            meets_minimum_requirement: mockPredictionValue >= 4.0,
+            ideal_sleep_range: "6-8 hours",
+            available_time: availableTime
+          },
           data: {
             workoutTime: features[0],
             readingTime: features[1],

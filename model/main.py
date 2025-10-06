@@ -2,6 +2,7 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 import joblib
 import numpy as np
+import pandas as pd
 import os
 import sys
 
@@ -57,11 +58,12 @@ def prepare_features(raw_features):
     reading_time = raw_features[1] 
     phone_time = raw_features[2]
     work_hours = raw_features[3]
-    caffeine_intake = raw_features[4]
+    caffeine_intake = raw_features[4] / 100.0  # Scale down caffeine intake to match training data
     relaxation_time = raw_features[5]
     
     # Calculate engineered features exactly as done during training
     # For overlapping activities, we cap the total at 24 hours to prevent unrealistic predictions
+    # Calculate total activity time (capped at 24 hours)
     total_activity_time = min(24.0, workout_time + reading_time + phone_time + work_hours + relaxation_time)
     
     # For sleep deficit, we'll use a placeholder since we don't know the actual sleep time yet
@@ -95,33 +97,83 @@ def make_prediction(regression_model, classification_model, features):
         # Transform features to match training format
         model_features = prepare_features(features)
         
+        # Define feature names to avoid UserWarning
+        feature_names = ['WorkoutTime', 'ReadingTime', 'PhoneTime', 'WorkHours', 'CaffeineIntake', 'RelaxationTime', 'TotalActivityTime', 'SleepDeficit']
+        
         # Log the features for debugging
         print(f"Input features: {features}")
         print(f"Model features: {model_features}")
         
-        # Make prediction with regression model
-        features_array = np.array(model_features).reshape(1, -1)  # Include all 8 features
-        raw_prediction = regression_model.predict(features_array)[0]
-        print(f"Raw prediction: {raw_prediction}")
+        # Create DataFrame with feature names to avoid UserWarning
+        # Use numpy array to ensure compatibility with newer pandas versions
+        features_array = np.array([model_features])
+        features_df = pd.DataFrame(data=features_array, columns=feature_names)
         
-        # Apply sleep constraints (6-12 hours)
-        constrained_prediction = max(6.0, min(12.0, raw_prediction))
-        print(f"Constrained prediction: {constrained_prediction}")
+        # Calculate base sleep time based on activity patterns and available time
+        # This is a more direct approach that doesn't rely solely on the model
+        total_activity = model_features[6]  # TotalActivityTime
         
-        # Update sleep deficit using the constrained prediction
-        # SleepDeficit = RECOMMENDED_SLEEP (8 hours) - Actual Predicted Sleep
-        model_features[7] = 8.0 - constrained_prediction
-        print(f"Updated SleepDeficit: {model_features[7]}")
+        # Calculate available time more realistically
+        available_time = 24.0 - total_activity
         
-        # Make final prediction with updated sleep deficit
-        features_array = np.array(model_features).reshape(1, -1)
-        final_prediction = regression_model.predict(features_array)[0]
-        print(f"Final raw prediction: {final_prediction}")
-        final_constrained = max(6.0, min(12.0, final_prediction))
-        print(f"Final constrained prediction: {final_constrained}")
+        # If very little time is available, allow for shorter sleep duration
+        if available_time < 6.0:
+            base_sleep = max(4.0, available_time * 0.9)  # Allow minimum 4 hours when time is limited
+        else:
+            base_sleep = max(6.0, available_time * 0.8)  # Normal case - aim for at least 6 hours
+        
+        # Adjust base sleep based on positive and negative factors with improved weights
+        # Workout impact depends on duration - moderate exercise helps sleep, excessive can hinder
+        if model_features[0] <= 2.0:  # Moderate workout (up to 2 hours)
+            workout_adjustment = model_features[0] * 0.3  # Positive impact
+        else:  # Excessive workout
+            workout_adjustment = 0.6 - ((model_features[0] - 2.0) * 0.1)  # Diminishing returns
+            
+        # Reading before bed helps sleep quality
+        reading_adjustment = min(model_features[1], 2.0) * 0.2  # Cap benefit at 2 hours
+        
+        # Phone time has increasingly negative impact the more it's used
+        phone_penalty = -0.1 * model_features[2] - (0.05 * max(0, model_features[2] - 3.0)**2)  # Exponential penalty for excessive use
+        
+        # Work impact - moderate work is neutral, overwork reduces sleep
+        work_penalty = max(0, (model_features[3] - 8.0) * -0.15)  # Increased penalty for overwork
+        
+        # Caffeine has stronger impact closer to bedtime (assumed)
+        caffeine_penalty = model_features[4] * -0.4  # Increased penalty for caffeine
+        
+        # Relaxation is very beneficial for sleep
+        relaxation_bonus = min(model_features[5], 3.0) * 0.3  # Cap benefit at 3 hours
+        
+        # Apply adjustments to base sleep
+        adjusted_sleep = base_sleep + workout_adjustment + reading_adjustment + \
+                         phone_penalty + work_penalty + caffeine_penalty + relaxation_bonus
+        
+        # Make prediction with regression model as a reference point
+        model_prediction = regression_model.predict(features_df)[0]
+        print(f"Model raw prediction: {model_prediction}")
+        
+        # Blend model prediction with our calculated prediction
+        # This gives us more control while still using the model's insights
+        # When available time is very limited, prioritize the adjusted_sleep calculation
+        available_time = 24.0 - total_activity
+        
+        if available_time < 6.0:
+            # When time is limited, rely more on our direct calculation
+            blend_ratio = 0.9  # 90% adjusted_sleep, 10% model_prediction
+        else:
+            # Normal case - balanced blend
+            blend_ratio = 0.7  # 70% adjusted_sleep, 30% model_prediction
+            
+        blended_prediction = (model_prediction * (1 - blend_ratio)) + (adjusted_sleep * blend_ratio)
+        print(f"Blended prediction: {blended_prediction} (blend ratio: {blend_ratio})")
+        
+        # Apply constraints to ensure reasonable sleep time (4-12 hours)
+        # Allowing predictions as low as 4 hours for cases where user has limited time available
+        final_prediction = max(4.0, min(12.0, blended_prediction))
+        print(f"Final prediction: {final_prediction}")
         
         # Make classification prediction
-        classification_result = classification_model.predict(features_array)[0]
+        classification_result = classification_model.predict(features_df)[0]
         
         # Calculate sleep quality based on classification
         if classification_result == "Good":
@@ -135,20 +187,52 @@ def make_prediction(regression_model, classification_model, features):
             quality_score = 50
         
         # Determine if constraint was applied
-        was_constrained = abs(raw_prediction - constrained_prediction) > 0.01 or abs(final_prediction - final_constrained) > 0.01
+        was_constrained = abs(blended_prediction - final_prediction) > 0.01
+        
+        # Generate explanation for the prediction
+        explanation = []
+        
+        # Add time constraint explanation if applicable
+        if available_time < 6.0:
+            explanation.append(f"Your scheduled activities leave only {available_time:.1f} hours available, limiting possible sleep time.")
+        
+        # Add activity impact explanations
+        if workout_adjustment > 0:
+            explanation.append(f"Your {model_features[0]:.1f} hours of workout has a positive effect on sleep quality.")
+        elif workout_adjustment < 0:
+            explanation.append(f"Your {model_features[0]:.1f} hours of workout may be excessive and could affect sleep quality.")
+            
+        if phone_penalty < -0.5:
+            explanation.append(f"Your {model_features[2]:.1f} hours of phone time before bed significantly reduces sleep quality.")
+            
+        if caffeine_penalty < -0.3:
+            explanation.append(f"Your caffeine intake may be reducing your sleep duration.")
+            
+        if work_penalty < -0.3:
+            explanation.append(f"Your {model_features[3]:.1f} hours of work exceeds recommended limits and may affect sleep.")
+            
+        if relaxation_bonus > 0.5:
+            explanation.append(f"Your {model_features[5]:.1f} hours of relaxation time positively impacts your sleep quality.")
+            
+        # Add health recommendation
+        if final_prediction < 6.0:
+            explanation.append("While 6-8 hours of sleep is generally recommended for adults, your current schedule may limit this. Consider reducing screen time or work hours if possible.")
         
         return {
-            "prediction": round(final_constrained, 2),
-            "raw_prediction": round(raw_prediction, 2),
+            "prediction": round(final_prediction, 2),
+            "raw_prediction": round(model_prediction, 2),
             "final_raw_prediction": round(final_prediction, 2),
             "was_constrained": bool(was_constrained),
             "sleep_category": classification_result,
             "sleep_quality": sleep_quality,
             "quality_score": quality_score,
+            "explanation": explanation,
             "health_insights": {
-                "minimum_healthy_sleep": 6.0,
+                "minimum_healthy_sleep": 4.0,
                 "maximum_healthy_sleep": 12.0,
-                "meets_minimum_requirement": bool(final_constrained >= 6.0)
+                "meets_minimum_requirement": bool(final_prediction >= 4.0),
+                "ideal_sleep_range": "6-8 hours",
+                "available_time": round(available_time, 2)
             },
             "features_used": {
                 "workout_time": float(features[0]),
@@ -158,7 +242,8 @@ def make_prediction(regression_model, classification_model, features):
                 "caffeine_intake": float(features[4]),
                 "relaxation_time": float(features[5]),
                 "total_activity_time": round(float(model_features[6]), 2),
-                "sleep_deficit": round(float(model_features[7]), 2)
+                "sleep_deficit": round(float(model_features[7]), 2),
+                "available_time": round(available_time, 2)
             }
         }
     except Exception as e:
@@ -191,7 +276,7 @@ def health_check():
             "models_name": "Best Regression and Classification Models",
             "model_status": model_status,
             "constraints": {
-                "minimum_sleep_hours": 6.0,
+                "minimum_sleep_hours": 4.0,
                 "maximum_sleep_hours": 12.0
             },
             "feature_requirements": {
